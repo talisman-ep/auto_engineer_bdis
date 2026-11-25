@@ -1,0 +1,36 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: auto-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - auto-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build: .
+    container_name: auto-backend
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      - MONGO_DSN=mongodb://mongo:27017
+      - RUN_DB_DEMO=1
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - auto-net
+
+volumes:
+  mongo_data:
+
+networks:
+  auto-net:
+    driver: bridge

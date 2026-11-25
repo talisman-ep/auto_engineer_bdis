@@ -1,5 +1,7 @@
 from uuid import UUID
 
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
+
 from backend.application.dtos import CarFilterDTO
 from backend.domain.entities import CarModel, Engineer, Manufacturer, Technology
 
@@ -10,12 +12,46 @@ class MongoCarAdapter:
     def __init__(self, dsn: str, db_name: str = "auto_engineers") -> None:
         self.dsn = dsn
         self.db_name = db_name
+        self._client: AsyncIOMotorClient | None = None
+
+    def _cars_collection(self) -> AsyncIOMotorCollection:
+        if self._client is None:
+            self._client = AsyncIOMotorClient(self.dsn)
+        return self._client[self.db_name]["car_models"]
 
     async def create(self, entity: CarModel) -> CarModel:
-        raise NotImplementedError("MongoDB insert is not connected yet")
+        doc = {
+            "_id": str(entity.model_id),
+            "model_id": str(entity.model_id),
+            "manufacturer_id": str(entity.manufacturer_id),
+            "model_name": entity.model_name,
+            "body_type": entity.body_type,
+            "fuel_type": entity.fuel_type,
+            "release_year": entity.release_year,
+            "horsepower": entity.horsepower,
+            "acceleration_0_100": entity.acceleration_0_100,
+            "drivetrain": entity.drivetrain,
+            "video_review_url": entity.video_review_url,
+        }
+        await self._cars_collection().insert_one(doc)
+        return entity
 
     async def get_by_id(self, entity_id: UUID) -> CarModel | None:
-        raise NotImplementedError("MongoDB find_one is not connected yet")
+        doc = await self._cars_collection().find_one({"_id": str(entity_id)})
+        if doc is None:
+            return None
+        return CarModel(
+            model_id=UUID(doc["model_id"]),
+            manufacturer_id=UUID(doc["manufacturer_id"]),
+            model_name=doc["model_name"],
+            body_type=doc["body_type"],
+            fuel_type=doc["fuel_type"],
+            release_year=doc["release_year"],
+            horsepower=doc["horsepower"],
+            acceleration_0_100=doc["acceleration_0_100"],
+            drivetrain=doc["drivetrain"],
+            video_review_url=doc["video_review_url"],
+        )
 
     async def list_all(self, limit: int = 50, offset: int = 0) -> list[CarModel]:
         raise NotImplementedError("MongoDB find is not connected yet")
