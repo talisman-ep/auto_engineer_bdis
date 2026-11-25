@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from uuid import uuid4
 
-from backend.application.dtos import CarFilterDTO, GeneratorRateDTO
+from backend.application.dtos import GeneratorRateDTO
 from backend.domain.normalizer import normalize_query
 from backend.main import bootstrap
 
@@ -34,8 +34,6 @@ class ArchitectureSkeletonTests(unittest.TestCase):
 
     def test_stub_adapters_raise_not_implemented(self) -> None:
         container = bootstrap()
-        with self.assertRaises(NotImplementedError):
-            asyncio.run(container.car_controller.list_cars(CarFilterDTO(fuel_type="Електро")))
         with self.assertRaises(NotImplementedError):
             asyncio.run(container.car_controller.get_recommendations(uuid4()))
         with self.assertRaises(NotImplementedError):

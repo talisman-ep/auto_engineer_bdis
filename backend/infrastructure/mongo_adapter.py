@@ -1,84 +1,138 @@
+from dataclasses import asdict, fields
 from uuid import UUID
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 
-from backend.application.dtos import CarFilterDTO
+from backend.application.dtos import CarFilterDTO, IngestCarBundleDTO
 from backend.domain.entities import CarModel, Engineer, Manufacturer, Technology
 
 
-class MongoCarAdapter:
-    """Driven Adapter for sharded MongoDB (Motor async client)."""
+def _to_doc(entity, id_field: str) -> dict:
+    doc = {key: str(value) if isinstance(value, UUID) else value
+           for key, value in asdict(entity).items()}
+    doc["_id"] = doc[id_field]
+    return doc
 
+
+def _from_doc(doc: dict, entity_type, *uuid_fields: str):
+    values = {field.name: doc[field.name] for field in fields(entity_type)}
+    for key in uuid_fields:
+        values[key] = UUID(values[key])
+    return entity_type(**values)
+
+
+def _to_car(doc: dict) -> CarModel:
+    return _from_doc(doc, CarModel, "model_id", "manufacturer_id")
+
+
+class MongoCarAdapter:
     def __init__(self, dsn: str, db_name: str = "auto_engineers") -> None:
         self.dsn = dsn
         self.db_name = db_name
         self._client: AsyncIOMotorClient | None = None
 
-    def _cars_collection(self) -> AsyncIOMotorCollection:
+    def _collection(self, name: str) -> AsyncIOMotorCollection:
         if self._client is None:
             self._client = AsyncIOMotorClient(self.dsn)
-        return self._client[self.db_name]["car_models"]
+        return self._client[self.db_name][name]
+
+    def _cars_collection(self) -> AsyncIOMotorCollection:
+        return self._collection("car_models")
+
+    async def ensure_indexes(self) -> None:
+        cars = self._cars_collection()
+        await cars.create_index([("fuel_type", 1), ("model_id", 1)])
+        await cars.create_index("body_type")
+        await cars.create_index("release_year")
+        await cars.create_index("manufacturer_id")
+
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
 
     async def create(self, entity: CarModel) -> CarModel:
-        doc = {
-            "_id": str(entity.model_id),
-            "model_id": str(entity.model_id),
-            "manufacturer_id": str(entity.manufacturer_id),
-            "model_name": entity.model_name,
-            "body_type": entity.body_type,
-            "fuel_type": entity.fuel_type,
-            "release_year": entity.release_year,
-            "horsepower": entity.horsepower,
-            "acceleration_0_100": entity.acceleration_0_100,
-            "drivetrain": entity.drivetrain,
-            "video_review_url": entity.video_review_url,
-        }
-        await self._cars_collection().insert_one(doc)
+        await self._cars_collection().insert_one(_to_doc(entity, "model_id"))
         return entity
+
+    async def create_bundles(self, bundles: list[IngestCarBundleDTO]) -> None:
+        if not bundles:
+            return
+        docs = []
+        for bundle in bundles:
+            doc = _to_doc(bundle.car_model, "model_id")
+            doc["engineer_ids"] = [str(e.engineer_id) for e in bundle.engineers]
+            doc["technology_ids"] = [str(t.tech_id) for t in bundle.technologies]
+            review = _to_doc(bundle.review, "review_id")
+            review.pop("_id")
+            doc["review"] = review
+            docs.append(doc)
+        await self._cars_collection().insert_many(docs, ordered=True)
 
     async def get_by_id(self, entity_id: UUID) -> CarModel | None:
         doc = await self._cars_collection().find_one({"_id": str(entity_id)})
-        if doc is None:
-            return None
-        return CarModel(
-            model_id=UUID(doc["model_id"]),
-            manufacturer_id=UUID(doc["manufacturer_id"]),
-            model_name=doc["model_name"],
-            body_type=doc["body_type"],
-            fuel_type=doc["fuel_type"],
-            release_year=doc["release_year"],
-            horsepower=doc["horsepower"],
-            acceleration_0_100=doc["acceleration_0_100"],
-            drivetrain=doc["drivetrain"],
-            video_review_url=doc["video_review_url"],
-        )
+        return _to_car(doc) if doc is not None else None
+
+    async def _find_cars(self, query: dict, limit: int, offset: int) -> list[CarModel]:
+        if limit < 1 or offset < 0:
+            raise ValueError("limit must be positive and offset non-negative")
+        cursor = self._cars_collection().find(query).sort("_id", 1).skip(offset).limit(limit)
+        return [_to_car(doc) async for doc in cursor]
 
     async def list_all(self, limit: int = 50, offset: int = 0) -> list[CarModel]:
-        raise NotImplementedError("MongoDB find is not connected yet")
+        return await self._find_cars({}, limit, offset)
 
     async def update(self, entity: CarModel) -> CarModel:
-        raise NotImplementedError("MongoDB update_one is not connected yet")
+        doc = _to_doc(entity, "model_id")
+        doc.pop("_id")
+        result = await self._cars_collection().update_one(
+            {"_id": str(entity.model_id)}, {"$set": doc}
+        )
+        if result.matched_count == 0:
+            raise LookupError(f"Car not found: {entity.model_id}")
+        return entity
 
     async def delete(self, entity_id: UUID) -> bool:
-        raise NotImplementedError("MongoDB delete_one is not connected yet")
+        result = await self._cars_collection().delete_one({"_id": str(entity_id)})
+        return result.deleted_count > 0
 
     async def filter_cars(self, filters: CarFilterDTO) -> list[CarModel]:
-        raise NotImplementedError("MongoDB filtered query is not connected yet")
+        query = {name: value for name, value in (
+            ("body_type", filters.body_type),
+            ("fuel_type", filters.fuel_type),
+            ("release_year", filters.release_year),
+        ) if value is not None}
+        return await self._find_cars(query, filters.limit, filters.offset)
 
     async def get_many_by_ids(self, model_ids: list[UUID]) -> list[CarModel]:
-        raise NotImplementedError("MongoDB $in query is not connected yet")
+        if not model_ids:
+            return []
+        cursor = self._cars_collection().find({"_id": {"$in": [str(i) for i in model_ids]}})
+        cars = {}
+        async for doc in cursor:
+            car = _to_car(doc)
+            cars[car.model_id] = car
+        return [cars[i] for i in model_ids if i in cars]
 
     async def upsert_manufacturer(self, manufacturer: Manufacturer) -> Manufacturer:
-        raise NotImplementedError("MongoDB upsert_manufacturer is not connected yet")
+        doc = _to_doc(manufacturer, "manufacturer_id")
+        await self._collection("manufacturers").replace_one({"_id": doc["_id"]}, doc, upsert=True)
+        return manufacturer
 
     async def get_manufacturer(self, manufacturer_id: UUID) -> Manufacturer | None:
-        raise NotImplementedError("MongoDB get_manufacturer is not connected yet")
+        doc = await self._collection("manufacturers").find_one({"_id": str(manufacturer_id)})
+        return _from_doc(doc, Manufacturer, "manufacturer_id") if doc is not None else None
 
     async def upsert_engineer(self, engineer: Engineer) -> Engineer:
-        raise NotImplementedError("MongoDB upsert_engineer is not connected yet")
+        doc = _to_doc(engineer, "engineer_id")
+        await self._collection("engineers").replace_one({"_id": doc["_id"]}, doc, upsert=True)
+        return engineer
 
     async def get_engineer(self, engineer_id: UUID) -> Engineer | None:
-        raise NotImplementedError("MongoDB get_engineer is not connected yet")
+        doc = await self._collection("engineers").find_one({"_id": str(engineer_id)})
+        return _from_doc(doc, Engineer, "engineer_id") if doc is not None else None
 
     async def upsert_technology(self, tech: Technology) -> Technology:
-        raise NotImplementedError("MongoDB upsert_technology is not connected yet")
+        doc = _to_doc(tech, "tech_id")
+        await self._collection("technologies").replace_one({"_id": doc["_id"]}, doc, upsert=True)
+        return tech
