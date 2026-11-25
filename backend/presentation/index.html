@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auto Engineers — Каталог</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#172230;background:#f4f6f9;line-height:1.5}
+*{box-sizing:border-box}body{margin:0}header{background:#162638;color:white;padding:24px max(5vw,16px)}header h1{margin:0;font-size:27px}header p{margin:4px 0 0;color:#c5d4e3}main{max-width:1200px;margin:24px auto;padding:0 16px}.panel{background:white;border:1px solid #dce3eb;border-radius:12px;padding:20px;margin-bottom:20px}h2{margin:0 0 14px;font-size:20px}.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;align-items:end}label{display:grid;gap:5px;font-size:14px;color:#405166}select,input,button{font:inherit;padding:9px 12px;border:1px solid #bfcbd7;border-radius:7px;background:white;color:inherit;min-width:0}button{cursor:pointer;background:#17649b;border-color:#17649b;color:white}button.secondary{background:white;color:#24455e;border-color:#bfcbd7}button:disabled{opacity:.45;cursor:default}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px;white-space:nowrap}th,td{text-align:left;padding:12px 10px;border-bottom:1px solid #e1e7ed}th{color:#526378;background:#f4f7fa}td:first-child{font-weight:600}.pager{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:16px}.muted{color:#596c80;font-size:14px}.error{color:#a52323}dialog{border:1px solid #c5d1dd;border-radius:12px;padding:24px;width:min(560px,94vw);color:#172230}dialog::backdrop{background:#13263888}dialog h2{margin-right:36px}.detail-head{display:flex;justify-content:space-between;align-items:start;gap:10px}dl{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px}dt{color:#526378}dd{margin:0;overflow-wrap:anywhere}a{color:#17649b}footer{padding:12px 0;color:#596c80;font-size:13px}
+</style>
+</head>
+<body>
+<header><h1>Auto Engineers</h1><p>Каталог автомобілів та технічних характеристик · MongoDB</p></header>
+<main>
+<section class="panel"><h2>Фільтрація каталогу</h2>
+<form id="filters" class="filters">
+<label>Тип кузова<select id="body"><option value="">Усі</option><option>Седан</option><option>Купе</option><option>Кросовер</option><option>Хетчбек</option><option>Універсал</option><option>Родстер</option></select></label>
+<label>Тип палива<select id="fuel"><option value="">Усі</option><option>Бензин</option><option>Дизель</option><option>Гібрид</option><option>Електро</option></select></label>
+<label>Рік випуску<input id="year" type="number" min="1995" max="2026" placeholder="Усі роки"></label>
+<button type="submit">Застосувати</button><button class="secondary" type="reset">Скинути</button>
+</form></section>
+<section class="panel"><h2>Автомобілі</h2><p id="status" class="muted" role="status">Завантаження…</p>
+<div class="table-wrap"><table><thead><tr><th>Модель</th><th>Кузов</th><th>Паливо</th><th>Рік</th><th>Потужність, к.с.</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="pager"><button id="prev" class="secondary" disabled>← Попередня</button><span id="page" class="muted">Сторінка 1</span><button id="next" class="secondary" disabled>Наступна →</button></div>
+</section><footer>Copyright©</footer>
+</main>
+<dialog id="detail"><div class="detail-head"><h2 id="detail-title">Картка автомобіля</h2><button id="close" class="secondary" type="button">Закрити</button></div><div id="detail-body"></div></dialog>
+<script>
+const $ = id => document.getElementById(id);
+const pageSize = 20;
+let offset = 0, filters = {}, loading = false, hasNext = false, detailRequest = 0;
+
+async function getJSON(url) {
+    const response = await fetch(url, {cache: 'no-store'});
+    if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(typeof body.detail === 'string' ? body.detail : `HTTP ${response.status}`);
+    }
+    return response.json();
+}
+
+function setPager() {
+    $('prev').disabled = loading || offset === 0;
+    $('next').disabled = loading || !hasNext;
+    $('page').textContent = `Сторінка ${offset / pageSize + 1}`;
+}
+
+async function loadCars() {
+    if (loading) return;
+    loading = true;
+    setPager();
+    $('status').className = 'muted';
+    $('status').textContent = 'Завантаження…';
+    $('rows').replaceChildren();
+    const query = new URLSearchParams({...filters, limit: pageSize + 1, offset});
+    const start = performance.now();
+    try {
+        const cars = await getJSON(`/api/cars?${query}`);
+        hasNext = cars.length > pageSize;
+        const visible = cars.slice(0, pageSize);
+        for (const car of visible) {
+            const row = document.createElement('tr');
+            for (const value of [car.model_name, car.body_type, car.fuel_type, car.release_year, car.horsepower]) {
+                const cell = row.insertCell();
+                cell.textContent = value;
+            }
+            const button = document.createElement('button');
+            button.textContent = 'Деталі';
+            button.className = 'secondary';
+            button.addEventListener('click', () => showCar(car.model_id));
+            row.insertCell().append(button);
+            $('rows').append(row);
+        }
+        $('status').textContent = visible.length ? `Показано ${offset + 1}–${offset + visible.length} · HTTP-запит: ${Math.round(performance.now() - start)} мс` : 'Автомобілів за заданими умовами не знайдено.';
+    } catch (error) {
+        hasNext = false;
+        $('status').className = 'error';
+        $('status').textContent = `Не вдалося завантажити каталог: ${error.message}`;
+    } finally {
+        loading = false;
+        setPager();
+    }
+}
+
+async function showCar(id) {
+    const requestId = ++detailRequest;
+    $('detail-title').textContent = 'Картка автомобіля';
+    $('detail-body').textContent = 'Завантаження…';
+    $('detail').showModal();
+    try {
+        const car = await getJSON(`/api/cars/${encodeURIComponent(id)}`);
+        if (!$('detail').open || requestId !== detailRequest) return;
+        $('detail-title').textContent = car.model_name;
+        const list = document.createElement('dl');
+        for (const [label, value] of Object.entries({'ID моделі': car.model_id, 'ID виробника': car.manufacturer_id, 'Кузов': car.body_type, 'Паливо': car.fuel_type, 'Рік випуску': car.release_year, 'Потужність': `${car.horsepower} к.с.`, 'Розгін 0–100': `${car.acceleration_0_100} с`, 'Привід': car.drivetrain})) {
+            const term = document.createElement('dt');
+            const description = document.createElement('dd');
+            term.textContent = label;
+            description.textContent = value;
+            list.append(term, description);
+        }
+        $('detail-body').replaceChildren(list);
+        try {
+            const url = new URL(car.video_review_url);
+            if (url.protocol === 'https:' && ['youtube.com', 'www.youtube.com', 'youtu.be'].includes(url.hostname)) {
+                const link = document.createElement('a');
+                link.href = url.href;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = 'Відеоогляди на YouTube';
+                $('detail-body').append(link);
+            }
+        } catch (_) {}
+    } catch (error) {
+        if ($('detail').open && requestId === detailRequest) $('detail-body').textContent = `Помилка: ${error.message}`;
+    }
+}
+
+$('filters').addEventListener('submit', event => {
+    event.preventDefault();
+    if (loading) return;
+    filters = {};
+    for (const [key, id] of [['body_type', 'body'], ['fuel_type', 'fuel'], ['release_year', 'year']]) {
+        if ($(id).value) filters[key] = $(id).value;
+    }
+    offset = 0;
+    loadCars();
+});
+$('filters').addEventListener('reset', event => {
+    if (loading) {event.preventDefault(); return;}
+    filters = {};
+    offset = 0;
+    loadCars();
+});
+$('prev').addEventListener('click', () => {if (!loading && offset > 0) {offset -= pageSize; loadCars();}});
+$('next').addEventListener('click', () => {if (!loading && hasNext) {offset += pageSize; loadCars();}});
+$('close').addEventListener('click', () => $('detail').close());
+loadCars();
+</script>
+</body>
+</html>
