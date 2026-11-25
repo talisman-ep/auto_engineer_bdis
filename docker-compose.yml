@@ -1,18 +1,49 @@
+x-mongo-node: &mongo-node
+  image: mongo:7
+  networks:
+    - auto-net
+  healthcheck:
+    test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+    interval: 5s
+    timeout: 5s
+    retries: 30
+    start_period: 10s
+
 services:
-  mongo:
-    image: mongo:7
-    container_name: auto-mongo
-    ports:
-      - "27017:27017"
+  configsvr:
+    <<: *mongo-node
+    command: ["mongod", "--configsvr", "--replSet", "rsConfig", "--port", "27017", "--bind_ip_all", "--dbpath", "/data/configdb", "--wiredTigerCacheSizeGB", "0.25"]
     volumes:
-      - mongo_data:/data/db
-    networks:
-      - auto-net
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+      - config_data:/data/configdb
+
+  shard1:
+    <<: *mongo-node
+    command: ["mongod", "--shardsvr", "--replSet", "rsShard1", "--port", "27017", "--bind_ip_all", "--dbpath", "/data/db", "--wiredTigerCacheSizeGB", "0.25"]
+    volumes:
+      - shard1_data:/data/db
+
+  shard2:
+    <<: *mongo-node
+    command: ["mongod", "--shardsvr", "--replSet", "rsShard2", "--port", "27017", "--bind_ip_all", "--dbpath", "/data/db", "--wiredTigerCacheSizeGB", "0.25"]
+    volumes:
+      - shard2_data:/data/db
+
+  shard3:
+    <<: *mongo-node
+    command: ["mongod", "--shardsvr", "--replSet", "rsShard3", "--port", "27017", "--bind_ip_all", "--dbpath", "/data/db", "--wiredTigerCacheSizeGB", "0.25"]
+    volumes:
+      - shard3_data:/data/db
+
+  mongo:
+    <<: *mongo-node
+    container_name: auto-mongo
+    command: ["mongos", "--configdb", "rsConfig/configsvr:27017", "--port", "27017", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27018:27017"
+    depends_on:
+      configsvr:
+        condition: service_healthy
+    restart: on-failure
 
   backend:
     build: .
@@ -31,7 +62,10 @@ services:
       - auto-net
 
 volumes:
-  mongo_data:
+  config_data:
+  shard1_data:
+  shard2_data:
+  shard3_data:
 
 networks:
   auto-net:
