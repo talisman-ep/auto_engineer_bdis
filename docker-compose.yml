@@ -45,6 +45,25 @@ services:
         condition: service_healthy
     restart: on-failure
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - auto-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health?wait_for_status=yellow || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
   backend:
     build: .
     container_name: auto-backend
@@ -54,8 +73,17 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+      shard1:
+        condition: service_healthy
+      shard2:
+        condition: service_healthy
+      shard3:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     environment:
       - MONGO_DSN=mongodb://mongo:27017
+      - ES_URL=http://elasticsearch:9200
     volumes:
       - ./logs:/app/logs
     networks:
@@ -66,6 +94,7 @@ volumes:
   shard1_data:
   shard2_data:
   shard3_data:
+  es_data:
 
 networks:
   auto-net:

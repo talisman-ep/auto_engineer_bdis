@@ -36,8 +36,6 @@ class ArchitectureSkeletonTests(unittest.TestCase):
         container = bootstrap()
         with self.assertRaises(NotImplementedError):
             asyncio.run(container.car_controller.get_recommendations(uuid4()))
-        with self.assertRaises(NotImplementedError):
-            asyncio.run(container.search_controller.search_reviews("активна аеродинаміка"))
 
 
 if __name__ == "__main__":

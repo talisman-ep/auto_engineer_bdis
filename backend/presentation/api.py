@@ -4,6 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from uuid import UUID
 
+from elasticsearch import ApiError, TransportError
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pymongo.errors import PyMongoError
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         container.mongo_adapter.close()
+        await container.es_adapter.close()
 
 
 app = FastAPI(title='Auto Engineers', lifespan=lifespan)
@@ -83,3 +85,17 @@ async def get_fuel_stats(request: Request):
         'collection': 'auto_engineers.car_models',
         'items': [asdict(item) for item in items],
     }
+
+
+@app.get('/api/search')
+async def search_reviews(request: Request, q: str = Query(..., min_length=1, max_length=200),
+                         limit: int = Query(20, ge=1, le=100)):
+    if not q.strip():
+        raise HTTPException(422, 'Введіть пошуковий запит')
+    try:
+        result = await request.app.state.container.search_controller.search_reviews(q, limit=limit)
+    except (ApiError, TransportError) as exc:
+        logger.exception('Elasticsearch search failed')
+        raise HTTPException(503, 'Elasticsearch або пошуковий індекс недоступний') from exc
+    logger.info('Review search: %r, source=%s, returned=%d', q, result.source, len(result.items))
+    return result

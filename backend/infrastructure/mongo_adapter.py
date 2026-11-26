@@ -1,10 +1,11 @@
+from collections.abc import AsyncIterator
 from dataclasses import asdict, fields
 from uuid import UUID
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 
 from backend.application.dtos import CarFilterDTO, CrossShardFuelStatsDTO, IngestCarBundleDTO
-from backend.domain.entities import CarModel, Engineer, Manufacturer, Technology
+from backend.domain.entities import CarModel, Engineer, Manufacturer, Review, Technology
 
 
 def _to_doc(entity, id_field: str) -> dict:
@@ -163,3 +164,8 @@ class MongoCarAdapter:
             )
             async for doc in cursor
         ]
+
+    async def iter_reviews(self) -> AsyncIterator[Review]:
+        cursor = self._cars_collection().find({"review.review_id": {"$exists": True}}, {"review": 1, "_id": 0})
+        async for doc in cursor:
+            yield _from_doc(doc["review"], Review, "review_id", "model_id")

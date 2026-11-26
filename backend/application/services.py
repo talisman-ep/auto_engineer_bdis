@@ -60,7 +60,7 @@ class CarMetadataService:
 
 class ReviewSearchService:
     def __init__(
-        self, review_repo: IReviewSearchPort, cache: ICachePort
+        self, review_repo: IReviewSearchPort, cache: ICachePort | None = None
     ) -> None:
         self._review_repo = review_repo
         self._cache = cache
@@ -72,7 +72,7 @@ class ReviewSearchService:
         normalized = normalize_query(raw_query)
         cache_key = f"search:{normalized}:{limit}"
 
-        cached = await self._cache.get(cache_key)
+        cached = await self._cache.get(cache_key) if self._cache is not None else None
         if cached is not None:
             raw_items = json.loads(cached)
             items = [ReviewSearchResultDTO(**item) for item in raw_items]
@@ -85,7 +85,8 @@ class ReviewSearchService:
 
         items = await self._review_repo.search_full_text(normalized, limit=limit)
         payload = json.dumps([asdict(item) for item in items], default=str)
-        await self._cache.set(cache_key, payload, ttl_seconds=300)
+        if self._cache is not None:
+            await self._cache.set(cache_key, payload, ttl_seconds=300)
 
         return SearchResponseDTO(
             raw_query=raw_query,

@@ -203,11 +203,17 @@ async def run(count: int, rate: int) -> None:
     from backend.infrastructure.mongo_adapter import MongoCarAdapter
 
     repo = MongoCarAdapter(os.getenv("MONGO_DSN", "mongodb://localhost:27017"))
+    from backend.infrastructure.es_adapter import ElasticsearchReviewAdapter
+
+    es_url = os.getenv("ES_URL")
+    es = ElasticsearchReviewAdapter(es_url) if es_url else None
     generator = CarGenerator()
     logger = logging.getLogger("generator")
     saved = 0
     try:
         await repo.ensure_indexes()
+        if es is not None:
+            await es.ensure_index()
         for manufacturer in generator.brands:
             await repo.upsert_manufacturer(manufacturer)
         for engineer in generator.engineers:
@@ -223,14 +229,24 @@ async def run(count: int, rate: int) -> None:
             bundles = [generator.generate() for _ in range(size)]
             await repo.create_bundles(bundles)
             saved += size
+            if es is not None:
+                try:
+                    await es.index_many([bundle.review for bundle in bundles])
+                except Exception:
+                    logger.exception("Reviews remain in MongoDB; rerun backend.index_reviews to recover the index")
+                    raise
             now = time.monotonic()
             if now - last_report >= 1:
                 logger.info("Saved %d bundles, average %.1f bundles/s", saved, saved / max(now - started, 0.001))
                 last_report = now
             await asyncio.sleep(max(0, size / rate - (time.monotonic() - tick)))
+        if es is not None:
+            await es.refresh()
     finally:
         logger.info("Finished: %d bundles in confirmed batches", saved)
         repo.close()
+        if es is not None:
+            await es.close()
 
 
 def main() -> None:

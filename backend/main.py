@@ -46,12 +46,13 @@ class AppContainer:
     car_controller: CarController
     search_controller: SearchController
     mongo_adapter: MongoCarAdapter
+    es_adapter: ElasticsearchReviewAdapter
 
 
 def bootstrap() -> AppContainer:
     mongo_dsn = os.getenv("MONGO_DSN", "mongodb://localhost:27017")
     mongo_adapter = MongoCarAdapter(dsn=mongo_dsn)
-    es_adapter = ElasticsearchReviewAdapter(url="http://localhost:9200")
+    es_adapter = ElasticsearchReviewAdapter(url=os.getenv("ES_URL", "http://localhost:9200"))
     neo4j_adapter = Neo4jGraphAdapter(
         uri="bolt://localhost:7687", user="neo4j", password="password"
     )
@@ -59,7 +60,7 @@ def bootstrap() -> AppContainer:
 
     metadata_service = CarMetadataService(car_repo=mongo_adapter)
     review_service = ReviewSearchService(
-        review_repo=es_adapter, cache=redis_adapter
+        review_repo=es_adapter, cache=None
     )
     graph_service = CarGraphService(graph_repo=neo4j_adapter)
 
@@ -75,6 +76,7 @@ def bootstrap() -> AppContainer:
         car_controller=CarController(facade=facade),
         search_controller=SearchController(facade=facade),
         mongo_adapter=mongo_adapter,
+        es_adapter=es_adapter,
     )
 
 
