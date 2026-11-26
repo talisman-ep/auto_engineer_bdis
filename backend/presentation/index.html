@@ -30,9 +30,10 @@
 <div class="table-wrap" style="margin-top:16px"><table><thead><tr><th>Тип палива</th><th>Кількість авто</th><th>Сер. потужність, к.с.</th><th>Сер. розгін 0–100, с</th><th>Мін. рік</th><th>Макс. рік</th></tr></thead><tbody id="analytics-rows"></tbody></table></div>
 </section>
 <section class="panel" id="search"><h2>Повнотекстовий пошук оглядів</h2>
-<p class="muted">Elasticsearch · пошук за заголовками і текстами синтетичних оглядів.</p>
+<p class="muted">Elasticsearch + Redis · пошук за заголовками і текстами синтетичних оглядів.</p>
 <form id="search-form" class="search-form"><label>Пошуковий запит<input id="search-query" required maxlength="200" placeholder="Наприклад, турбонаддув або BMW"></label><button id="search-submit" type="submit">Знайти</button></form>
 <p id="search-status" class="muted" role="status">Введіть слова для пошуку.</p>
+<p id="cache-stats" class="muted" role="status">Статистика кешу за час роботи бекенду: —</p>
 <div id="search-results"></div></section>
 <footer>Дані синтетичні, призначені для навчального проєкту.</footer>
 </main>
@@ -190,8 +191,16 @@ async function searchReviews(event) {
             article.append(title, meta, snippet, details);
             $('search-results').append(article);
         }
-        const source = payload.source === 'cache' ? 'Кеш' : 'Elasticsearch';
-        $('search-status').textContent = `${payload.items.length ? `Показано: ${payload.items.length}` : 'Нічого не знайдено'} · Джерело: ${source} · HTTP-запит: ${elapsed} мс · Нормалізовано: ${payload.normalized_query}`;
+        const source = payload.source === 'cache' ? 'Redis' : 'Elasticsearch';
+        const cacheLabels = {hit: 'HIT', miss: 'MISS', bypass: 'BYPASS (Redis недоступний)', miss_write_failed: 'MISS (помилка збереження)', disabled: 'Вимкнено'};
+        const cacheStatus = cacheLabels[payload.cache_status] || '—';
+        const stats = payload.cache_stats;
+        if (stats) {
+            const total = stats.hits + stats.misses;
+            const ratio = total ? (100 * stats.hits / total).toFixed(1) : '0.0';
+            $('cache-stats').textContent = `Статистика кешу: влучання ${stats.hits} · промахи ${stats.misses} · обхід ${stats.bypasses} · помилки запису ${stats.write_errors} · Hit rate ${ratio}%`;
+        }
+        $('search-status').textContent = `${payload.items.length ? `Показано: ${payload.items.length}` : 'Нічого не знайдено'} · Джерело: ${source} · Кеш: ${cacheStatus} · HTTP-запит: ${elapsed} мс · Нормалізовано: ${payload.normalized_query}`;
     } catch (error) {
         $('search-status').className = 'error';
         $('search-status').textContent = `Помилка пошуку: ${error.message}`;

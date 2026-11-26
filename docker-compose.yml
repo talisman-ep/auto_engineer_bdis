@@ -64,6 +64,17 @@ services:
       retries: 30
       start_period: 30s
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    networks:
+      - auto-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build: .
     container_name: auto-backend
@@ -84,6 +95,7 @@ services:
     environment:
       - MONGO_DSN=mongodb://mongo:27017
       - ES_URL=http://elasticsearch:9200
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./logs:/app/logs
     networks:

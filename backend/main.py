@@ -47,6 +47,7 @@ class AppContainer:
     search_controller: SearchController
     mongo_adapter: MongoCarAdapter
     es_adapter: ElasticsearchReviewAdapter
+    redis_adapter: RedisCacheAdapter
 
 
 def bootstrap() -> AppContainer:
@@ -56,11 +57,11 @@ def bootstrap() -> AppContainer:
     neo4j_adapter = Neo4jGraphAdapter(
         uri="bolt://localhost:7687", user="neo4j", password="password"
     )
-    redis_adapter = RedisCacheAdapter(url="redis://localhost:6379/0")
+    redis_adapter = RedisCacheAdapter(url=os.getenv("REDIS_URL", "redis://localhost:6379/0"))
 
     metadata_service = CarMetadataService(car_repo=mongo_adapter)
     review_service = ReviewSearchService(
-        review_repo=es_adapter, cache=None
+        review_repo=es_adapter, cache=redis_adapter
     )
     graph_service = CarGraphService(graph_repo=neo4j_adapter)
 
@@ -77,6 +78,7 @@ def bootstrap() -> AppContainer:
         search_controller=SearchController(facade=facade),
         mongo_adapter=mongo_adapter,
         es_adapter=es_adapter,
+        redis_adapter=redis_adapter,
     )
 
 

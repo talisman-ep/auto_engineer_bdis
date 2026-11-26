@@ -1,14 +1,17 @@
 import json
-from dataclasses import asdict
+import logging
+from dataclasses import asdict, replace
 from uuid import UUID
 
 from backend.application.dtos import (
+    CacheStatsDTO,
     CarFilterDTO,
     CrossShardFuelStatsDTO,
     ReviewSearchResultDTO,
     SearchResponseDTO,
 )
 from backend.application.ports import (
+    CacheUnavailableError,
     ICachePort,
     ICarDocumentPort,
     ICarGraphPort,
@@ -22,6 +25,8 @@ from backend.domain.entities import (
     Technology,
 )
 from backend.domain.normalizer import normalize_query
+
+logger = logging.getLogger("auto_engineers.search")
 
 
 class CarMetadataService:
@@ -64,35 +69,62 @@ class ReviewSearchService:
     ) -> None:
         self._review_repo = review_repo
         self._cache = cache
+        self._stats = CacheStatsDTO()
 
     async def index_review(self, review: Review) -> Review:
         return await self._review_repo.create(review)
 
     async def search(self, raw_query: str, limit: int = 20) -> SearchResponseDTO:
         normalized = normalize_query(raw_query)
-        cache_key = f"search:{normalized}:{limit}"
+        cache_key = f"search:v1:{normalized}:{limit}"
+        status = "disabled"
 
-        cached = await self._cache.get(cache_key) if self._cache is not None else None
-        if cached is not None:
-            raw_items = json.loads(cached)
-            items = [ReviewSearchResultDTO(**item) for item in raw_items]
-            return SearchResponseDTO(
-                raw_query=raw_query,
-                normalized_query=normalized,
-                source="cache",
-                items=items,
-            )
+        if self._cache is not None:
+            try:
+                cached = await self._cache.get(cache_key)
+                if cached is not None:
+                    raw_items = json.loads(cached)
+                    if not isinstance(raw_items, list):
+                        raise ValueError("Invalid cache payload")
+                    items = [
+                        ReviewSearchResultDTO(**{
+                            **item,
+                            "review_id": UUID(item["review_id"]),
+                            "model_id": UUID(item["model_id"]),
+                        }) for item in raw_items
+                    ]
+                    self._stats.hits += 1
+                    return SearchResponseDTO(
+                        raw_query=raw_query, normalized_query=normalized,
+                        source="cache", items=items, cache_status="hit",
+                        cache_stats=replace(self._stats),
+                    )
+                status = "miss"
+            except CacheUnavailableError:
+                logger.warning("Redis unavailable; searching Elasticsearch directly")
+                self._stats.bypasses += 1
+                status = "bypass"
+            except (ValueError, TypeError, KeyError, AttributeError):
+                logger.warning("Invalid cached search payload; rebuilding result")
+                status = "miss"
+
+            if status == "miss":
+                self._stats.misses += 1
 
         items = await self._review_repo.search_full_text(normalized, limit=limit)
-        payload = json.dumps([asdict(item) for item in items], default=str)
-        if self._cache is not None:
-            await self._cache.set(cache_key, payload, ttl_seconds=300)
+        if self._cache is not None and status == "miss":
+            payload = json.dumps([asdict(item) for item in items], default=str)
+            try:
+                await self._cache.set(cache_key, payload, ttl_seconds=300)
+            except CacheUnavailableError:
+                logger.warning("Redis cache write failed; returning Elasticsearch result")
+                self._stats.write_errors += 1
+                status = "miss_write_failed"
 
         return SearchResponseDTO(
-            raw_query=raw_query,
-            normalized_query=normalized,
-            source="elasticsearch",
-            items=items,
+            raw_query=raw_query, normalized_query=normalized,
+            source="elasticsearch", items=items, cache_status=status,
+            cache_stats=replace(self._stats),
         )
 
 

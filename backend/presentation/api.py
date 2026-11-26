@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pymongo.errors import PyMongoError
 
-from backend.application.dtos import CarFilterDTO
+from backend.application.dtos import CarFilterDTO, SearchResponseDTO
 from backend.main import bootstrap, setup_logging
 
 logger = logging.getLogger('auto_engineers.api')
@@ -24,7 +24,10 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         container.mongo_adapter.close()
-        await container.es_adapter.close()
+        try:
+            await container.es_adapter.close()
+        finally:
+            await container.redis_adapter.close()
 
 
 app = FastAPI(title='Auto Engineers', lifespan=lifespan)
@@ -87,7 +90,7 @@ async def get_fuel_stats(request: Request):
     }
 
 
-@app.get('/api/search')
+@app.get('/api/search', response_model=SearchResponseDTO)
 async def search_reviews(request: Request, q: str = Query(..., min_length=1, max_length=200),
                          limit: int = Query(20, ge=1, le=100)):
     if not q.strip():
@@ -97,5 +100,6 @@ async def search_reviews(request: Request, q: str = Query(..., min_length=1, max
     except (ApiError, TransportError) as exc:
         logger.exception('Elasticsearch search failed')
         raise HTTPException(503, 'Elasticsearch або пошуковий індекс недоступний') from exc
-    logger.info('Review search: %r, source=%s, returned=%d', q, result.source, len(result.items))
+    logger.info('Review search: %r, source=%s, cache=%s, returned=%d',
+                q, result.source, result.cache_status, len(result.items))
     return result

@@ -55,11 +55,21 @@ class ReviewSearchResultDTO:
 
 
 @dataclass
+class CacheStatsDTO:
+    hits: int = 0
+    misses: int = 0
+    bypasses: int = 0
+    write_errors: int = 0
+
+
+@dataclass
 class SearchResponseDTO:
     raw_query: str
     normalized_query: str
     source: str  # "cache" або "elasticsearch"
     items: list[ReviewSearchResultDTO] = field(default_factory=list)
+    cache_status: str = "disabled"
+    cache_stats: CacheStatsDTO = field(default_factory=CacheStatsDTO)
 
 
 @dataclass
