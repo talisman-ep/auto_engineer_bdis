@@ -1,53 +1,51 @@
 # Автомобілі та Інженери
 
-Курсова робота з дисципліни «Бази даних та інформаційні системи» (КПІ, ФПМ).  
+Курсова робота з дисципліни «Бази даних та інформаційні системи» (КПІ, ФПМ).
 Варіант 13 — «Автомобілі та Інженери (Конструктори)».
 
-**Команда:**
+Команда:
 - Пилипчук Євгеній (КМ-43)
 - Кваченко Дмитро (КМ-43)
 - Нагнойний Єгор (КМ-42)
 
-## Стек і сховища
+## Технології
 
-Бекенд на Python (FastAPI + asyncio) з Polyglot Persistence:
-- **MongoDB** (3 shards) — основні дані (`car_models`, `manufacturers`, `engineers`, `technologies`) та фільтрація.
-- **Elasticsearch** — full-text search по технічних оглядах (`car_reviews`).
-- **Neo4j** — граф зв'язків (`СПРОЄКТУВАВ`, `ВИПУЩЕНА`, `ВИКОРИСТОВУЄ`) та рекомендації.
-- **Redis** — кеш для нормалізованих пошукових запитів і лічильники.
+- Python, FastAPI, asyncio
+- MongoDB — основне сховище з шардуванням на 3 вузли
+- Elasticsearch — повнотекстовий та нечіткий пошук оглядів
+- Neo4j — графові зв'язки та рекомендації (заплановано)
+- Redis — кешування запитів (заплановано)
+- Docker Compose — розгортання системи
 
-## Архітектура
+Архітектура: Layered Architecture, Hexagonal Architecture, CQRS, Polyglot Persistence.
 
-Використано Layered + Hexagonal Architecture (Ports & Adapters) і поділ на Write/Read (CQRS).
+## Реалізований функціонал
 
-Ланцюжок викликів:
-`Controllers -> CarFacade -> Services -> Ports (CrudRepository) <- Adapters`
+- Генерація синтетичних даних на основі 132 профілів моделей від 42 виробників.
+- Каталог автомобілів, фільтрація та перегляд характеристик.
+- Шардування MongoDB та порівняльне тестування швидкості запису.
+- Розподілена агрегація через Aggregation Pipeline.
+- Повнотекстовий пошук, Fuzzy Search та нормалізація запитів.
+- Модульні та інтеграційні тести.
 
-Структура проєкту:
-```text
-backend/
-├── main.py              # bootstrap / збірка залежностей (DI)
-├── domain/
-│   ├── entities.py      # CarModel, Manufacturer, Engineer, Technology, Review
-│   └── normalizer.py    # нормалізація пошукових запитів
-├── application/
-│   ├── dtos.py          # DTO
-│   ├── ports.py         # CrudRepository та порти сховищ
-│   ├── services.py      # CarMetadataService, ReviewSearchService, CarGraphService
-│   └── facade.py        # CarFacade
-├── presentation/
-│   └── controllers.py   # IngestController, CarController, SearchController
-└── infrastructure/      # адаптери для MongoDB, Elasticsearch, Neo4j, Redis
-tests/
-└── test_structure.py    # перевірка збірки та заглушок
-```
-
-## Поточний стан
-
-Зроблено базовий каркас і класи-заглушки. Адаптери в `infrastructure/` поки повертають `NotImplementedError` — підключення баз даних і генератора буде на наступних етапах.
-
-## Запуск тестів
+## Запуск
 
 ```bash
-python -m unittest discover -s tests -v
+docker compose up -d --build --wait
+```
+
+Вебінтерфейс: http://localhost:8000
+
+Swagger UI: http://localhost:8000/docs
+
+## Генерація даних
+
+```bash
+docker compose run --rm --no-deps backend python -m backend.generator --count 1000 --rate 100
+```
+
+## Тестування
+
+```bash
+docker compose run --rm --no-deps backend python -m unittest discover -s tests -v
 ```
