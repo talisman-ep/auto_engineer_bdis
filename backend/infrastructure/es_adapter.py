@@ -105,13 +105,26 @@ class ElasticsearchReviewAdapter:
         return True
 
     async def search_full_text(self, query: str, limit: int = 20) -> list[ReviewSearchResultDTO]:
-        result = await self._connection().search(
+        client = self._connection()
+        highlight = {"fields": {"content": {"fragment_size": 180, "number_of_fragments": 1}},
+                     "pre_tags": ["<em>"], "post_tags": ["</em>"]}
+        result = await client.search(
             index=self.index_name, size=limit,
             query={"multi_match": {"query": query, "fields": ["title^2", "content"],
                                    "type": "cross_fields", "operator": "and"}},
-            highlight={"fields": {"content": {"fragment_size": 180, "number_of_fragments": 1}},
-                       "pre_tags": ["<em>"], "post_tags": ["</em>"]},
+            highlight=highlight,
         )
+        if not result["hits"]["hits"] and query.split():
+            result = await client.search(
+                index=self.index_name, size=limit,
+                query={"bool": {"must": [
+                    {"multi_match": {"query": term, "fields": ["title^2", "content"],
+                                     "type": "best_fields", "operator": "and",
+                                     "fuzziness": "AUTO", "max_expansions": 30}}
+                    for term in query.split()
+                ]}},
+                highlight=highlight,
+            )
         items = []
         for hit in result["hits"]["hits"]:
             doc = hit["_source"]
