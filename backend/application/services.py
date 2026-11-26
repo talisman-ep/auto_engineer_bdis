@@ -4,6 +4,7 @@ from uuid import UUID
 
 from backend.application.dtos import (
     CarFilterDTO,
+    CrossShardFuelStatsDTO,
     ReviewSearchResultDTO,
     SearchResponseDTO,
 )
@@ -46,6 +47,9 @@ class CarMetadataService:
 
     async def filter_cars(self, filters: CarFilterDTO) -> list[CarModel]:
         return await self._car_repo.filter_cars(filters)
+
+    async def aggregate_fuel_stats(self) -> list[CrossShardFuelStatsDTO]:
+        return await self._car_repo.aggregate_fuel_stats()
 
     async def get_cars_by_ids(self, model_ids: list[UUID]) -> list[CarModel]:
         return await self._car_repo.get_many_by_ids(model_ids)

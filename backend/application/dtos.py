@@ -71,3 +71,13 @@ class EngineerPortfolioDTO:
 @dataclass
 class GeneratorRateDTO:
     target_rps: int
+
+
+@dataclass
+class CrossShardFuelStatsDTO:
+    fuel_type: str
+    cars_count: int
+    avg_horsepower: float
+    avg_acceleration: float
+    min_year: int
+    max_year: int

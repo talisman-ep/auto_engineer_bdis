@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from pathlib import Path
 from uuid import UUID
 
@@ -65,3 +66,20 @@ async def get_car(request: Request, model_id: UUID):
         raise HTTPException(404, 'Автомобіль не знайдено')
     logger.info('Car found: %s', model_id)
     return car
+
+
+@app.get('/api/analytics/fuel-stats')
+async def get_fuel_stats(request: Request):
+    try:
+        items = await request.app.state.container.car_controller.get_fuel_stats()
+    except PyMongoError as exc:
+        logger.exception('MongoDB aggregation failed')
+        raise HTTPException(503, 'MongoDB недоступна') from exc
+
+    logger.info('Cross-shard aggregation returned %d rows', len(items))
+    return {
+        'query': 'fuel_stats_by_type',
+        'engine': 'mongodb_aggregation_pipeline',
+        'collection': 'auto_engineers.car_models',
+        'items': [asdict(item) for item in items],
+    }

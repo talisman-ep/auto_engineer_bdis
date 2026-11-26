@@ -10,7 +10,7 @@
 </style>
 </head>
 <body>
-<header><h1>Auto Engineers</h1><p>Каталог автомобілів та технічних характеристик · MongoDB</p></header>
+<header><h1>Auto Engineers</h1><p>Каталог автомобілів та технічних характеристик · MongoDB</p><p><a href="#analytics" style="color:#c5d4e3">Перейти до аналітики</a></p></header>
 <main>
 <section class="panel"><h2>Фільтрація каталогу</h2>
 <form id="filters" class="filters">
@@ -22,7 +22,13 @@
 <section class="panel"><h2>Автомобілі</h2><p id="status" class="muted" role="status">Завантаження…</p>
 <div class="table-wrap"><table><thead><tr><th>Модель</th><th>Кузов</th><th>Паливо</th><th>Рік</th><th>Потужність, к.с.</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
 <div class="pager"><button id="prev" class="secondary" disabled>← Попередня</button><span id="page" class="muted">Сторінка 1</span><button id="next" class="secondary" disabled>Наступна →</button></div>
-</section><footer>Copyright©</footer>
+</section>
+<section class="panel" id="analytics"><h2>Аналітика по шардах</h2>
+<p class="muted">Зведена статистика всього каталогу (незалежно від фільтрів) через MongoDB Aggregation Pipeline.</p>
+<div class="pager"><button id="analytics-refresh" type="button">Оновити аналітику</button><span id="analytics-status" class="muted" role="status">Завантаження…</span></div>
+<div class="table-wrap" style="margin-top:16px"><table><thead><tr><th>Тип палива</th><th>Кількість авто</th><th>Сер. потужність, к.с.</th><th>Сер. розгін 0–100, с</th><th>Мін. рік</th><th>Макс. рік</th></tr></thead><tbody id="analytics-rows"></tbody></table></div>
+</section>
+<footer>Дані синтетичні, призначені для навчального проєкту.</footer>
 </main>
 <dialog id="detail"><div class="detail-head"><h2 id="detail-title">Картка автомобіля</h2><button id="close" class="secondary" type="button">Закрити</button></div><div id="detail-body"></div></dialog>
 <script>
@@ -116,6 +122,37 @@ async function showCar(id) {
     }
 }
 
+async function loadFuelStats() {
+    const button = $('analytics-refresh');
+    if (button.disabled) return;
+    button.disabled = true;
+    $('analytics-status').className = 'muted';
+    $('analytics-status').textContent = 'Завантаження агрегації…';
+    $('analytics-rows').replaceChildren();
+    const start = performance.now();
+    try {
+        const payload = await getJSON('/api/analytics/fuel-stats');
+        const elapsed = Math.round(performance.now() - start);
+        let total = 0;
+        for (const item of payload.items) {
+            total += item.cars_count;
+            const row = document.createElement('tr');
+            for (const value of [item.fuel_type, item.cars_count, item.avg_horsepower.toFixed(2), item.avg_acceleration.toFixed(2), item.min_year, item.max_year]) {
+                row.insertCell().textContent = value;
+            }
+            $('analytics-rows').append(row);
+        }
+        $('analytics-status').textContent = payload.items.length
+            ? `Всього автомобілів: ${total} · Груп: ${payload.items.length} · HTTP-запит: ${elapsed} мс`
+            : 'У каталозі немає даних для агрегації.';
+    } catch (error) {
+        $('analytics-status').className = 'error';
+        $('analytics-status').textContent = `Не вдалося виконати агрегацію: ${error.message}`;
+    } finally {
+        button.disabled = false;
+    }
+}
+
 $('filters').addEventListener('submit', event => {
     event.preventDefault();
     if (loading) return;
@@ -135,7 +172,9 @@ $('filters').addEventListener('reset', event => {
 $('prev').addEventListener('click', () => {if (!loading && offset > 0) {offset -= pageSize; loadCars();}});
 $('next').addEventListener('click', () => {if (!loading && hasNext) {offset += pageSize; loadCars();}});
 $('close').addEventListener('click', () => $('detail').close());
+$('analytics-refresh').addEventListener('click', loadFuelStats);
 loadCars();
+loadFuelStats();
 </script>
 </body>
 </html>

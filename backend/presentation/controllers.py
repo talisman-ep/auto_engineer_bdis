@@ -2,6 +2,7 @@ from uuid import UUID
 
 from backend.application.dtos import (
     CarFilterDTO,
+    CrossShardFuelStatsDTO,
     EngineerPortfolioDTO,
     GeneratorRateDTO,
     IngestCarBundleDTO,
@@ -37,6 +38,9 @@ class CarController:
 
     async def get_car(self, model_id: UUID) -> CarModel | None:
         return await self._facade.get_car(model_id)
+
+    async def get_fuel_stats(self) -> list[CrossShardFuelStatsDTO]:
+        return await self._facade.get_fuel_stats()
 
     async def get_engineer_works(
         self, engineer_id: UUID

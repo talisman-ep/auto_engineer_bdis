@@ -1,7 +1,7 @@
 from typing import Protocol, TypeVar
 from uuid import UUID
 
-from backend.application.dtos import CarFilterDTO, ReviewSearchResultDTO
+from backend.application.dtos import CarFilterDTO, CrossShardFuelStatsDTO, ReviewSearchResultDTO
 from backend.domain.entities import (
     CarModel,
     Engineer,
@@ -24,6 +24,7 @@ class CrudRepository(Protocol[T, ID]):
 
 class ICarDocumentPort(CrudRepository[CarModel, UUID], Protocol):
     async def filter_cars(self, filters: CarFilterDTO) -> list[CarModel]: ...
+    async def aggregate_fuel_stats(self) -> list[CrossShardFuelStatsDTO]: ...
     async def get_many_by_ids(self, model_ids: list[UUID]) -> list[CarModel]: ...
     async def upsert_manufacturer(self, manufacturer: Manufacturer) -> Manufacturer: ...
     async def get_manufacturer(self, manufacturer_id: UUID) -> Manufacturer | None: ...

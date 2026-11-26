@@ -3,6 +3,7 @@ from uuid import UUID
 
 from backend.application.dtos import (
     CarFilterDTO,
+    CrossShardFuelStatsDTO,
     EngineerPortfolioDTO,
     GeneratorRateDTO,
     IngestCarBundleDTO,
@@ -68,6 +69,9 @@ class CarFacade:
 
     async def get_car(self, model_id: UUID) -> CarModel | None:
         return await self._metadata.get_car(model_id)
+
+    async def get_fuel_stats(self) -> list[CrossShardFuelStatsDTO]:
+        return await self._metadata.aggregate_fuel_stats()
 
     async def search_reviews(
         self, query: str, limit: int = 20

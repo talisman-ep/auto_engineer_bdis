@@ -3,7 +3,7 @@ from uuid import UUID
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 
-from backend.application.dtos import CarFilterDTO, IngestCarBundleDTO
+from backend.application.dtos import CarFilterDTO, CrossShardFuelStatsDTO, IngestCarBundleDTO
 from backend.domain.entities import CarModel, Engineer, Manufacturer, Technology
 
 
@@ -136,3 +136,30 @@ class MongoCarAdapter:
         doc = _to_doc(tech, "tech_id")
         await self._collection("technologies").replace_one({"_id": doc["_id"]}, doc, upsert=True)
         return tech
+
+    async def aggregate_fuel_stats(self) -> list[CrossShardFuelStatsDTO]:
+        pipeline = [
+            {
+                "$group": {
+                    "_id": "$fuel_type",
+                    "cars_count": {"$sum": 1},
+                    "avg_horsepower": {"$avg": "$horsepower"},
+                    "avg_acceleration": {"$avg": "$acceleration_0_100"},
+                    "min_year": {"$min": "$release_year"},
+                    "max_year": {"$max": "$release_year"},
+                }
+            },
+            {"$sort": {"_id": 1}},
+        ]
+        cursor = self._cars_collection().aggregate(pipeline, allowDiskUse=True)
+        return [
+            CrossShardFuelStatsDTO(
+                fuel_type=doc["_id"],
+                cars_count=doc["cars_count"],
+                avg_horsepower=round(doc["avg_horsepower"], 2),
+                avg_acceleration=round(doc["avg_acceleration"], 2),
+                min_year=doc["min_year"],
+                max_year=doc["max_year"],
+            )
+            async for doc in cursor
+        ]
