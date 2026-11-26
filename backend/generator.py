@@ -11,35 +11,8 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from backend.application.dtos import IngestCarBundleDTO
 from backend.domain.entities import CarModel, Engineer, Manufacturer, Review, Technology
 
-BRANDS = [
-    ("Toyota", "Японія", 1937, "масовий", "Corolla"),
-    ("Honda", "Японія", 1948, "масовий", "Civic"),
-    ("Mazda", "Японія", 1920, "масовий", "CX"),
-    ("Nissan", "Японія", 1933, "масовий", "Qashqai"),
-    ("Subaru", "Японія", 1953, "масовий", "Impreza"),
-    ("Hyundai", "Південна Корея", 1967, "масовий", "IONIQ"),
-    ("Kia", "Південна Корея", 1944, "масовий", "Sportage"),
-    ("Ford", "США", 1903, "масовий", "Focus"),
-    ("Chevrolet", "США", 1911, "масовий", "Malibu"),
-    ("Volkswagen", "Німеччина", 1937, "масовий", "Golf"),
-    ("Skoda", "Чехія", 1895, "масовий", "Octavia"),
-    ("Renault", "Франція", 1899, "масовий", "Megane"),
-    ("Peugeot", "Франція", 1810, "масовий", "3008"),
-    ("Fiat", "Італія", 1899, "масовий", "Tipo"),
-    ("BMW", "Німеччина", 1916, "преміум", "Series"),
-    ("Mercedes-Benz", "Німеччина", 1926, "преміум", "Class"),
-    ("Audi", "Німеччина", 1909, "преміум", "A"),
-    ("Volvo", "Швеція", 1927, "преміум", "XC"),
-    ("Lexus", "Японія", 1989, "преміум", "RX"),
-    ("Jaguar", "Велика Британія", 1922, "преміум", "F-Type"),
-    ("Porsche", "Німеччина", 1931, "спорткари", "911"),
-    ("Ferrari", "Італія", 1947, "спорткари", "GT"),
-    ("Lamborghini", "Італія", 1963, "спорткари", "Huracan"),
-    ("McLaren", "Велика Британія", 1963, "гіперкари", "GT"),
-    ("Koenigsegg", "Швеція", 1994, "гіперкари", "Jesko"),
-]
-BODY_TYPES = ["Седан", "Купе", "Кросовер", "Хетчбек", "Універсал", "Родстер"]
-FUEL_TYPES = ["Бензин", "Дизель", "Гібрид", "Електро"]
+from backend.model_profiles import BRANDS, BODY_TYPES, FUEL_TYPES, MODEL_PROFILES, ModelProfile
+
 FIRST_NAMES = ["Олександр", "Андрій", "Максим", "Іван", "Дмитро", "Анна", "Марія", "Олена", "Софія", "Ірина"]
 LAST_NAMES = ["Коваленко", "Шевченко", "Бондар", "Мельник", "Кравченко", "Ткаченко", "Лисенко", "Савчук", "Бойко", "Поліщук", "Мороз", "Олійник"]
 ROLES = ["Головний інженер", "Шеф-дизайнер", "Інженер шасі", "Інженер двигунів", "Інженер електроніки"]
@@ -86,8 +59,6 @@ TECH_GROUPS = {
     },
 }
 COUNTRIES = ["Україна", "Німеччина", "Японія", "США", "Італія", "Франція", "Швеція"]
-POWER_RANGES = {"масовий": (120, 300), "преміум": (180, 600),
-                "спорткари": (350, 800), "гіперкари": (650, 1100)}
 KEYWORDS = ["динаміка", "керованість", "аеродинаміка", "стійкість", "комфорт",
             "безпека", "ефективність", "підвіска", "гальмування", "маневреність",
             "ергономіка", "шумоізоляція", "надійність", "прискорення", "зчеплення",
@@ -102,8 +73,14 @@ def stable_id(kind: str, name: str) -> UUID:
 class CarGenerator:
     def __init__(self) -> None:
         self.brands = [Manufacturer(stable_id("manufacturer", name), name, country, year, segment)
-                       for name, country, year, segment, _ in BRANDS]
-        self.prefixes = {row[0]: row[4] for row in BRANDS}
+                       for name, country, year, segment in BRANDS]
+        self.brand_by_name = {brand.brand_name: brand for brand in self.brands}
+        current_year = datetime.now(timezone.utc).year
+        self.profiles_by_fuel = {
+            fuel: tuple(p for p in MODEL_PROFILES if p.fuel == fuel and p.first_year <= current_year)
+            for fuel in FUEL_TYPES
+        }
+        self.engineers_by_year = {}
         rng = random.Random(13)
         self.engineers = []
         for first in FIRST_NAMES:
@@ -122,25 +99,43 @@ class CarGenerator:
                              for category, entries in TECH_GROUPS.items()
                              for name, description in entries.items()]
 
-    @staticmethod
-    def _drivetrain(body: str, power: int) -> str:
-        if power >= 500:
-            weights = (0, 45, 55)
-        elif body == "Кросовер":
-            weights = (20, 10, 70)
-        elif body in {"Купе", "Родстер"}:
-            weights = (10, 65, 25)
-        else:
-            weights = (65, 20, 15)
-        return random.choices(["Передній", "Задній", "Повний"], weights=weights, k=1)[0]
+    def _technologies_for(self, car: CarModel, profile: ModelProfile) -> list[Technology]:
+        fuel = car.fuel_type
+        year = car.release_year
+        required = set()
+        if profile.turbo:
+            required.add("Турбонаддув")
+        if fuel == "Електро":
+            required.add("Електродвигун")
+        if fuel == "Гібрид":
+            required.add("Гібридний привід")
+        if car.drivetrain == "Повний":
+            required.add("Повний привід")
 
-    def _technologies_for(self, car: CarModel) -> list[Technology]:
+        modern_from = {
+            "Адаптивний круїз-контроль": 2005,
+            "Утримання смуги": 2010,
+            "Автоматичне гальмування": 2010,
+            "Розпізнавання знаків": 2012,
+            "Контроль сліпих зон": 2008,
+            "Паркувальний асистент": 2008,
+            "Активний спойлер": 2000,
+            "Керамічні гальма": 2002,
+            "Активні жалюзі": 2010,
+            "Швидке заряджання": 2015,
+            "Термоконтроль батареї": 2010,
+            "Літій-іонна батарея": 2010,
+        }
         combustion = {"Турбонаддув", "Пряме впорскування", "Змінні фази газорозподілу"}
         electric = {"Електродвигун", "Рекуперація енергії"}
+        sporty = car.body_type in {"Купе", "Родстер"} and car.horsepower >= 300
         allowed = []
         for tech in self.technologies:
             name = tech.tech_name
-            fuel = car.fuel_type
+            if year < modern_from.get(name, 1995):
+                continue
+            if name == "Турбонаддув" and not profile.turbo:
+                continue
             if name == "Повний привід" and car.drivetrain != "Повний":
                 continue
             if fuel == "Електро" and (name in combustion or name == "Гібридний привід"):
@@ -149,8 +144,19 @@ class CarGenerator:
                 continue
             if fuel == "Гібрид" and name == "Швидке заряджання":
                 continue
+            if fuel == "Дизель" and name == "Змінні фази газорозподілу":
+                continue
+            if name in {"Активний спойлер", "Керамічні гальма", "Аеродинамічний обвіс"} and not sporty:
+                continue
+            if name == "Пневматична підвіска" and (car.body_type != "Кросовер" or self.brand_by_name[profile.brand].segment == "масовий"):
+                continue
+            if year < 2000 and tech.category == "Автопілот":
+                continue
             allowed.append(tech)
-        return random.sample(allowed, random.randint(2, 4))
+        selected = [tech for tech in allowed if tech.tech_name in required]
+        optional = [tech for tech in allowed if tech.tech_name not in required]
+        target = random.randint(max(2, len(selected)), 4)
+        return selected + random.sample(optional, min(len(optional), target - len(selected)))
 
     def _review(self, brand: Manufacturer, car: CarModel,
                 engineers: list[Engineer], technologies: list[Technology]) -> Review:
@@ -169,7 +175,7 @@ class CarGenerator:
         tech_text = " ".join(f"{t.tech_name}: {t.description}" for t in technologies)
         content = (f"{intro} Тип кузова: {car.body_type}. Паливо: {car.fuel_type}. "
                    f"Конструктори: {names}.\n\n{dynamics} Привід: {car.drivetrain}.\n\n"
-                   f"Технології моделі: {tech_text}\n\n"
+                   f"Технології синтетичної конфігурації: {tech_text}\n\n"
                    f"Підсумок. Критерії оцінювання: {', '.join(keywords)}.")
         now = datetime.now(timezone.utc).replace(microsecond=0)
         start = datetime(car.release_year, 1, 1, tzinfo=timezone.utc)
@@ -177,24 +183,31 @@ class CarGenerator:
         return Review(uuid4(), car.model_id, f"{review_type}: {label} ({car.release_year})",
                       content, published, round(min(10.0, max(5.0, random.gauss(8.0, 1.0))), 1))
 
-    def generate(self) -> IngestCarBundleDTO:
-        brand = random.choice(self.brands)
-        fuel = random.choice(FUEL_TYPES)
-        body = random.choice(BODY_TYPES)
-        low, high = POWER_RANGES[brand.segment]
-        power = random.randrange(low, high + 1, 10)
-        name = f"{self.prefixes[brand.brand_name]} {random.randint(1, 99)} {random.choice(['Base', 'Sport', 'GT'])}"
-        year = random.randint(1995, min(2026, datetime.now(timezone.utc).year))
+    def generate(self, profile: ModelProfile | None = None) -> IngestCarBundleDTO:
+        # Preserve the four fuel categories used by the sharding benchmark.
+        if profile is None:
+            fuel = random.choice(FUEL_TYPES)
+            profile = random.choice(self.profiles_by_fuel[fuel])
+        brand = self.brand_by_name[profile.brand]
+        year = random.randint(profile.first_year, min(profile.last_year, datetime.now(timezone.utc).year))
+        power = random.randint(profile.min_hp, profile.max_hp)
+        span = profile.max_hp - profile.min_hp
+        fraction = (power - profile.min_hp) / span if span else 0.5
+        acc = profile.max_acc - fraction * (profile.max_acc - profile.min_acc)
+        acc += random.uniform(-0.15, 0.15)
+        acc = round(max(profile.min_acc, min(profile.max_acc, acc)), 1)
+        name = profile.name
         car = CarModel(
             model_id=uuid4(), manufacturer_id=brand.manufacturer_id,
-            model_name=name, body_type=body, fuel_type=fuel, release_year=year,
-            horsepower=power,
-            acceleration_0_100=round(max(2.0, 14 - power / 85 + random.uniform(-0.4, 0.4)), 1),
-            drivetrain=self._drivetrain(body, power),
+            model_name=name, body_type=profile.body, fuel_type=profile.fuel, release_year=year,
+            horsepower=power, acceleration_0_100=acc,
+            drivetrain=profile.drive,
             video_review_url="https://www.youtube.com/results?" + urlencode({"search_query": f"{brand.brand_name} {name} review"}),
         )
-        engineers = random.sample([e for e in self.engineers if e.career_start_year <= year], random.randint(1, 2))
-        technologies = self._technologies_for(car)
+        if year not in self.engineers_by_year:
+            self.engineers_by_year[year] = [e for e in self.engineers if e.career_start_year <= year]
+        engineers = random.sample(self.engineers_by_year[year], random.randint(1, 2))
+        technologies = self._technologies_for(car, profile)
         return IngestCarBundleDTO(brand, car, engineers, technologies,
                                   self._review(brand, car, engineers, technologies))
 
